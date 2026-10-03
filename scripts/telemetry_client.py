@@ -1,9 +1,12 @@
 """Stream Raspberry Pi telemetry to the AURA Edge Socket.IO endpoint."""
 
+import json
 import os
 import socket
 import time
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 import socketio
 
@@ -12,6 +15,8 @@ SERVER_URL = os.getenv("AURA_SERVER_URL", "https://powerdreams.top")
 SOCKET_PATH = os.getenv("AURA_SOCKET_PATH", "/api/socket")
 DEVICE_ID = os.getenv("AURA_DEVICE_ID", "AURA-EDGE-01")
 INTERVAL_SECONDS = float(os.getenv("AURA_TELEMETRY_INTERVAL", "1"))
+THERMAL_ALERT_THRESHOLD = float(os.getenv("AURA_THERMAL_ALERT_THRESHOLD", "75"))
+THERMAL_ALERT_URL = os.getenv("AURA_THERMAL_ALERT_URL", f"{SERVER_URL}/api/telemetry/thermal")
 
 sio = socketio.Client(reconnection=True, logger=False, engineio_logger=False)
 
@@ -63,6 +68,25 @@ def disconnect() -> None:
     print("Telemetry connection closed; retrying...")
 
 
+def monitor_thermal_threshold(device_id: str, cpu_temp: float) -> None:
+    """Notify the Next.js thermal route when a device crosses the alert threshold."""
+    if cpu_temp <= THERMAL_ALERT_THRESHOLD:
+        return
+
+    request = Request(
+        THERMAL_ALERT_URL,
+        data=json.dumps({"deviceId": device_id, "cpuTemp": cpu_temp}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=2) as response:
+            if response.status >= 400:
+                print(f"[ALERT CHECK FAILED] thermal endpoint returned HTTP {response.status}")
+    except (OSError, URLError) as error:
+        print(f"[ALERT CHECK FAILED] {error}")
+
+
 def build_payload() -> dict[str, object]:
     return {
         "deviceId": DEVICE_ID,
@@ -78,7 +102,9 @@ def main() -> None:
     sio.connect(SERVER_URL, socketio_path=SOCKET_PATH)
     try:
         while True:
-            sio.emit("telemetry_update", build_payload())
+            payload = build_payload()
+            sio.emit("telemetry_update", payload)
+            monitor_thermal_threshold(DEVICE_ID, float(payload["cpuTemp"]))
             time.sleep(INTERVAL_SECONDS)
     except KeyboardInterrupt:
         print("Stopping telemetry client")
