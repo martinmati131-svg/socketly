@@ -12,6 +12,15 @@ type Telemetry = {
   last_seen?: string
 }
 
+type Detection = {
+  _id: string
+  imageUrl: string
+  detectedObjects: string[]
+  confidenceMax: number
+  deviceId: string
+  timestamp: string
+}
+
 const initialTelemetry: Telemetry = {
   device_id: 'AURA-EDGE-01',
   status: 'Operational',
@@ -24,6 +33,14 @@ const initialTelemetry: Telemetry = {
 export default function Page() {
   const [telemetry, setTelemetry] = useState<Telemetry>(initialTelemetry)
   const [connected, setConnected] = useState(false)
+  const [detections, setDetections] = useState<Detection[]>([])
+
+  useEffect(() => {
+    fetch('/api/detections/list')
+      .then((response) => (response.ok ? response.json() : { records: [] }))
+      .then((data: { records?: Detection[] }) => setDetections(data.records ?? []))
+      .catch(() => setDetections([]))
+  }, [])
 
   useEffect(() => {
     const socket = io({ path: '/api/socket' })
@@ -97,6 +114,35 @@ export default function Page() {
             <InfoRow label="Uptime" value={telemetry.uptime ?? '—'} />
             <InfoRow label="Stream status" value={telemetry.last_seen ?? 'Awaiting signal'} />
           </div>
+
+          <section className="mt-12" aria-labelledby="detections-heading">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.25em] text-cyan-300">Computer vision / archive</p>
+                <h2 id="detections-heading" className="mt-2 text-2xl font-semibold tracking-tight text-white">Recent detections</h2>
+              </div>
+              <span className="text-xs text-slate-500">{detections.length} records</span>
+            </div>
+
+            {detections.length > 0 ? (
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {detections.map((detection) => (
+                  <article key={detection._id} className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035]">
+                    <img src={detection.imageUrl} alt={`Detection from ${detection.deviceId}`} className="aspect-[4/3] w-full object-cover" />
+                    <div className="p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="truncate text-sm font-medium text-white">{detection.detectedObjects.join(', ') || 'No objects labeled'}</p>
+                        <span className="shrink-0 text-xs text-cyan-300">{(detection.confidenceMax * 100).toFixed(1)}%</span>
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">{detection.deviceId}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-5 rounded-2xl border border-dashed border-white/10 px-6 py-10 text-center text-sm text-slate-500">No detections have been recorded yet.</div>
+            )}
+          </section>
         </section>
 
         <footer className="flex flex-col gap-2 border-t border-white/10 pt-5 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
