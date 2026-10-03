@@ -27,7 +27,7 @@ type MongoGlobal = typeof globalThis & {
 const mongoUri = process.env.MONGODB_URI
 const globalMongo = globalThis as MongoGlobal
 
-let statsigInitialization: Promise<void> | undefined
+let statsigInitialization: Promise<unknown> | undefined
 
 async function uploadGateEnabled(userId: string) {
   const secret = process.env.STATSIG_SERVER_SECRET
