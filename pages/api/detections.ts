@@ -1,5 +1,6 @@
 import { put } from '@vercel/blob'
 import { MongoClient } from 'mongodb'
+import Statsig from 'statsig-node'
 import formidable, { type Fields, type Files, type File as FormidableFile } from 'formidable'
 import { readFile } from 'node:fs/promises'
 import type { NextApiRequest, NextApiResponse } from 'next'
@@ -25,6 +26,18 @@ type MongoGlobal = typeof globalThis & {
 
 const mongoUri = process.env.MONGODB_URI
 const globalMongo = globalThis as MongoGlobal
+
+let statsigInitialization: Promise<void> | undefined
+
+async function uploadGateEnabled(userId: string) {
+  const secret = process.env.STATSIG_SERVER_SECRET
+  if (!secret) return true
+
+  statsigInitialization ??= Statsig.initialize(secret)
+  await statsigInitialization
+
+  return Statsig.checkGate({ userID: userId }, 'protect_uploads')
+}
 
 if (!mongoUri) {
   throw new Error('MONGODB_URI is not configured')
@@ -81,6 +94,14 @@ export default async function handler(request: NextApiRequest, response: NextApi
       metadata = parsed as DetectionMetadata
     }
 
+    const deviceId = typeof metadata.deviceId === 'string' && metadata.deviceId.trim()
+      ? metadata.deviceId.trim().slice(0, 100)
+      : 'rpi_5_edge'
+
+    if (!(await uploadGateEnabled(deviceId))) {
+      return response.status(403).json({ error: 'Uploads are currently disabled' })
+    }
+
     const safeName = imageFile.originalFilename?.replace(/[^a-zA-Z0-9._-]/g, '_') || 'detection.jpg'
     const image = new File([await readFile(imageFile.filepath)], safeName, {
       type: imageFile.mimetype || 'image/jpeg',
@@ -94,7 +115,7 @@ export default async function handler(request: NextApiRequest, response: NextApi
       imageUrl: blob.url,
       detectedObjects: Array.isArray(metadata.objects) ? metadata.objects : [],
       confidenceMax: typeof metadata.maxConfidence === 'number' && Number.isFinite(metadata.maxConfidence) ? metadata.maxConfidence : 0,
-      deviceId: typeof metadata.deviceId === 'string' && metadata.deviceId.trim() ? metadata.deviceId.trim().slice(0, 100) : 'rpi_5_edge',
+      deviceId,
       timestamp: new Date(),
     }
 
