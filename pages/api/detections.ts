@@ -1,5 +1,7 @@
 import { put } from '@vercel/blob'
 import { MongoClient } from 'mongodb'
+import formidable, { type Fields, type Files, type File as FormidableFile } from 'formidable'
+import { readFile } from 'node:fs/promises'
 import type { NextApiRequest, NextApiResponse } from 'next'
 
 type DetectionMetadata = {
@@ -33,8 +35,26 @@ const clientPromise = globalMongo.detectionMongoPromise ?? client.connect()
 globalMongo.detectionMongoClient = client
 if (process.env.NODE_ENV !== 'production') globalMongo.detectionMongoPromise = clientPromise
 
-function isImageFile(value: FormDataEntryValue | null): value is File {
-  return value instanceof File && value.size > 0 && value.type.startsWith('image/')
+function firstField(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function firstFile(value: FormidableFile | FormidableFile[] | undefined) {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function parseMultipart(request: NextApiRequest) {
+  const form = formidable({
+    maxFileSize: 10 * 1024 * 1024,
+    multiples: false,
+  })
+
+  return new Promise<{ fields: Fields; files: Files }>((resolve, reject) => {
+    form.parse(request, (error, fields, files) => {
+      if (error) reject(error)
+      else resolve({ fields, files })
+    })
+  })
 }
 
 export default async function handler(request: NextApiRequest, response: NextApiResponse) {
@@ -44,16 +64,16 @@ export default async function handler(request: NextApiRequest, response: NextApi
   }
 
   try {
-    const formData = await request.formData()
-    const imageFile = formData.get('file')
-    const metadataValue = formData.get('metadata')
+    const { fields, files } = await parseMultipart(request)
+    const imageFile = firstFile(files.file)
+    const metadataValue = firstField(fields.metadata)
 
-    if (!isImageFile(imageFile)) {
+    if (!imageFile || imageFile.size <= 0 || !imageFile.mimetype?.startsWith('image/')) {
       return response.status(400).json({ error: 'An image file is required' })
     }
 
     let metadata: DetectionMetadata = {}
-    if (typeof metadataValue === 'string' && metadataValue.trim()) {
+    if (metadataValue?.trim()) {
       const parsed = JSON.parse(metadataValue) as unknown
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         return response.status(400).json({ error: 'Metadata must be a JSON object' })
@@ -61,8 +81,11 @@ export default async function handler(request: NextApiRequest, response: NextApi
       metadata = parsed as DetectionMetadata
     }
 
-    const safeName = imageFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const blob = await put(`detections/${Date.now()}-${safeName}`, imageFile, {
+    const safeName = imageFile.originalFilename?.replace(/[^a-zA-Z0-9._-]/g, '_') || 'detection.jpg'
+    const image = new File([await readFile(imageFile.filepath)], safeName, {
+      type: imageFile.mimetype || 'image/jpeg',
+    })
+    const blob = await put(`detections/${Date.now()}-${safeName}`, image, {
       access: 'public',
       addRandomSuffix: true,
     })
