@@ -1,3 +1,4 @@
+import { Client } from '@upstash/qstash'
 import { put } from '@vercel/blob'
 import { MongoClient } from 'mongodb'
 import Statsig from 'statsig-node'
@@ -28,6 +29,8 @@ const mongoUri = process.env.MONGODB_URI
 const globalMongo = globalThis as MongoGlobal
 
 let statsigInitialization: Promise<unknown> | undefined
+
+const qstash = process.env.QSTASH_TOKEN ? new Client({ token: process.env.QSTASH_TOKEN }) : null
 
 async function uploadGateEnabled(userId: string) {
   const secret = process.env.STATSIG_SERVER_SECRET
@@ -121,6 +124,16 @@ export default async function handler(request: NextApiRequest, response: NextApi
 
     const database = await clientPromise
     const result = await database.db('aura_db').collection<DetectionRecord>('detections').insertOne(record)
+
+    if (qstash) {
+      const destinationUrl = process.env.QSTASH_DESTINATION_URL
+        || `${process.env.NEXT_PUBLIC_APP_URL || 'https://powerdreams.top'}/api/jobs/detection`
+
+      await qstash.publishJSON({
+        url: destinationUrl,
+        body: { id: result.insertedId.toString(), imageUrl: blob.url },
+      })
+    }
 
     return response.status(201).json({ success: true, url: blob.url, id: result.insertedId })
   } catch (error) {
