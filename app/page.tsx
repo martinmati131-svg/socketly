@@ -27,7 +27,7 @@ export default function Page() {
   return (
     <main className="min-h-screen bg-[#070b12] text-slate-100">
       <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 py-6 sm:px-8 lg:px-10">
-        <header className="flex items-center justify-between border-b border-white/10 pb-6">
+        <header className="sticky top-4 z-50 mx-auto flex max-w-sm items-center justify-between border-b border-white/10 px-4 pb-6 pointer-events-auto">
           <div className="flex items-center gap-3">
             <div className="flex size-10 items-center justify-center rounded-xl bg-cyan-400/10 ring-1 ring-cyan-300/20">
               <span className="size-3 rounded-full bg-cyan-300 shadow-[0_0_18px_4px_rgba(103,232,249,0.45)]" />
